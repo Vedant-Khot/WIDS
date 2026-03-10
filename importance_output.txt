@@ -1,0 +1,184 @@
+======================================================================
+RAW DATASET FEATURES
+======================================================================
+   1. num_perimeters_0_5h
+   2. dt_first_last_0_5h
+   3. low_temporal_resolution_0_5h
+   4. area_first_ha
+   5. area_growth_abs_0_5h
+   6. area_growth_rel_0_5h
+   7. area_growth_rate_ha_per_h
+   8. log1p_area_first
+   9. log1p_growth
+  10. log_area_ratio_0_5h
+  11. relative_growth_0_5h
+  12. radial_growth_m
+  13. radial_growth_rate_m_per_h
+  14. centroid_displacement_m
+  15. centroid_speed_m_per_h
+  16. spread_bearing_deg
+  17. spread_bearing_sin
+  18. spread_bearing_cos
+  19. dist_min_ci_0_5h
+  20. dist_std_ci_0_5h
+  21. dist_change_ci_0_5h
+  22. dist_slope_ci_0_5h
+  23. closing_speed_m_per_h
+  24. closing_speed_abs_m_per_h
+  25. projected_advance_m
+  26. dist_accel_m_per_h2
+  27. dist_fit_r2_0_5h
+  28. alignment_cos
+  29. alignment_abs
+  30. cross_track_component
+  31. along_track_speed
+  32. event_start_hour
+  33. event_start_dayofweek
+  34. event_start_month
+
+Total raw features: 34
+Total samples: 221
+Event rate: 31.22% (69 events out of 221)
+
+======================================================================
+TRAINING GBSA FOR FEATURE IMPORTANCE
+======================================================================
+
+======================================================================
+FEATURE IMPORTANCE RANKING (Top 30)
+======================================================================
+Rank   Feature                                  Importance   Category
+--------------------------------------------------------------------------------
+  1    dist_min_ci_0_5h                         0.403029     [DST] Distance/Closing
+       ##############################
+  2    log_dist_min                             0.237291     [DST] Distance/Closing
+       #################
+  3    dist_min_sq                              0.201218     [DST] Distance/Closing
+       ##############
+  4    dt_first_last_0_5h                       0.030581     [OBS] Observation
+       ##
+  5    area_first_ha                            0.013574     [FIR] Fire Size/Growth
+       #
+  6    num_perimeters_0_5h                      0.012764     [FIR] Fire Size/Growth
+       
+  7    perimeter_rate                           0.010896     [FIR] Fire Size/Growth
+       
+  8    hour_cos                                 0.010476     [TMP] Temporal
+       
+  9    log_area_first                           0.010020     [FIR] Fire Size/Growth
+       
+  10   alignment_cos                            0.009635     [DIR] Direction
+       
+  11   log1p_area_first                         0.009599     [FIR] Fire Size/Growth
+       
+  12   event_start_hour                         0.007937     [TMP] Temporal
+       
+  13   event_start_dayofweek                    0.005603     [TMP] Temporal
+       
+  14   alignment_abs                            0.005325     [DIR] Direction
+       
+  15   event_start_month                        0.004811     [TMP] Temporal
+       
+  16   month_sin                                0.004282     [TMP] Temporal
+       
+  17   cross_track_component                    0.003683     [DIR] Direction
+       
+  18   hour_sin                                 0.002969     [TMP] Temporal
+       
+  19   spread_bearing_cos                       0.002163     [DIR] Direction
+       
+  20   low_temporal_resolution_0_5h             0.002147     [OBS] Observation
+       
+  21   month_cos                                0.001735     [TMP] Temporal
+       
+  22   spread_bearing_deg                       0.001680     [DIR] Direction
+       
+  23   dist_growth_interaction                  0.001555     [DST] Distance/Closing
+       
+  24   intensity_proxy                          0.001378     [FIR] Fire Size/Growth
+       
+  25   dist_risk_close                          0.000844     [DST] Distance/Closing
+       
+  26   is_night                                 0.000763     [TMP] Temporal
+       
+  27   is_summer                                0.000510     [TMP] Temporal
+       
+  28   dist_risk_medium                         0.000504     [DST] Distance/Closing
+       
+  29   along_track_urgency                      0.000415     [URG] Urgency
+       
+  30   log_area_ratio_0_5h                      0.000403     [FIR] Fire Size/Growth
+       
+
+======================================================================
+CATEGORY-LEVEL IMPORTANCE (aggregated)
+======================================================================
+  [DST] Distance/Closing     84.5%  ##########################################
+  [FIR] Fire Size/Growth      6.0%  ##
+  [TMP] Temporal              3.9%  #
+  [OBS] Observation           3.3%  #
+  [DIR] Direction             2.3%  #
+  [URG] Urgency               0.0%  
+  [SPD] Speed                 0.0%  
+  [OTH] Other                 0.0%  
+
+======================================================================
+CORRELATION WITH EVENT (Top 20 by absolute correlation)
+======================================================================
+  1    dist_risk_close                          +0.8647 [+]
+       ###########################################
+  2    log_dist_min                             -0.8115 [-]
+       ########################################
+  3    dist_risk_far                            -0.6238 [-]
+       ###############################
+  4    dist_min_ci_0_5h                         -0.4814 [-]
+       ########################
+  5    low_temporal_resolution_0_5h             -0.3791 [-]
+       ##################
+  6    num_perimeters_0_5h                      +0.3705 [+]
+       ##################
+  7    perimeter_rate                           -0.3682 [-]
+       ##################
+  8    dt_first_last_0_5h                       +0.3530 [+]
+       #################
+  9    alignment_abs                            +0.3491 [+]
+       #################
+  10   spread_bearing_cos                       -0.3232 [-]
+       ################
+  11   dist_min_sq                              -0.3110 [-]
+       ###############
+  12   has_growth                               +0.2984 [+]
+       ##############
+  13   intensity_proxy                          +0.2939 [+]
+       ##############
+  14   log1p_growth                             +0.2927 [+]
+       ##############
+  15   spread_bearing_deg                       +0.2810 [+]
+       ##############
+  16   dist_growth_interaction                  +0.2410 [+]
+       ############
+  17   log_area_ratio_0_5h                      +0.2293 [+]
+       ###########
+  18   radial_growth_rate_m_per_h               +0.2150 [+]
+       ##########
+  19   radial_growth_m                          +0.2093 [+]
+       ##########
+  20   centroid_speed_m_per_h                   +0.2093 [+]
+       ##########
+
+======================================================================
+KEY FEATURE STATISTICS (Event=1 vs Event=0)
+======================================================================
+Feature                             Event=1 (mean)     Event=0 (mean)     Ratio     
+-------------------------------------------------------------------------------------
+  dist_min_ci_0_5h                  2285.82            179832.30          0.01      
+  closing_speed_m_per_h             6.29               0.08               76.82     
+  area_first_ha                     230.37             795.61             0.29      
+  area_growth_rate_ha_per_h         16.50              1.48               11.17     
+  alignment_abs                     0.34               0.10               3.59      
+  radial_growth_rate_m_per_h        19.82              2.30               8.61      
+  centroid_speed_m_per_h            30.22              3.66               8.25      
+  num_perimeters_0_5h               3.48               1.42               2.45      
+  event_start_month                 7.00               6.68               1.05      
+
+[DONE] Analysis complete!
