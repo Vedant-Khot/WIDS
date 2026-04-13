@@ -1,8 +1,9 @@
 """
-WiDS 2025 Datathon - Wildfire Survival Analysis Model (v3)
-==========================================================
-Advanced feature engineering: fire behavior, contextual anomaly, and threat composite features.
-Builds on v2 calibration and ensemble approach with domain-driven additional features.
+WiDS 2025 Datathon - Wildfire Survival Analysis Model (v3-Optuna)
+================================================================
+Based on the proven v2 pipeline (score: 0.95975).
+Uses Optuna to find optimal GBSA hyperparameters instead of hand-picked configs.
+RSF, CoxPH, Weibull remain the same as v2.
 """
 
 import numpy as np
@@ -18,24 +19,27 @@ from sksurv.ensemble import GradientBoostingSurvivalAnalysis, RandomSurvivalFore
 from sksurv.metrics import concordance_index_censored
 from lifelines import WeibullAFTFitter, CoxPHFitter
 
+import optuna
+optuna.logging.set_verbosity(optuna.logging.WARNING)
+
 import os
 
 # ============================================================
 # 1. DATA LOADING
 # ============================================================
 print("=" * 70)
-print("WiDS 2025 WILDFIRE SURVIVAL ANALYSIS (v3)")
+print("WiDS 2025 WILDFIRE SURVIVAL ANALYSIS (v3-Optuna)")
 print("=" * 70)
 
 DATA_DIR = r"d:\wids"
-train_df = pd.read_csv(os.path.join(DATA_DIR, "train_imputed_advanced.csv"))
-test_df = pd.read_csv(os.path.join(DATA_DIR, "test_imputed_advanced.csv"))
+train_df = pd.read_csv(os.path.join(DATA_DIR, "train_fixed.csv"))
+test_df = pd.read_csv(os.path.join(DATA_DIR, "test.csv"))
 sample_sub = pd.read_csv(os.path.join(DATA_DIR, "sample_submission.csv"))
 
 print(f"Train: {train_df.shape}, Test: {test_df.shape}")
 
 # ============================================================
-# 2. FEATURE ENGINEERING
+# 2. FEATURE ENGINEERING (same as v2 — proven to work)
 # ============================================================
 target_cols = ['event_id', 'time_to_hit_hours', 'event']
 
@@ -43,16 +47,9 @@ def engineer_features(df):
     """Create additional features from existing ones."""
     df = df.copy()
     
-    # Log distance to evacuation zone
     df['log_dist_min'] = np.log1p(df['dist_min_ci_0_5h'])
-    
-    # Interaction: closing speed × alignment
     df['closing_x_alignment'] = df['closing_speed_m_per_h'] * df['alignment_abs']
-    
-    # Urgency: closing speed / distance
     df['urgency_ratio'] = df['closing_speed_m_per_h'] / (df['dist_min_ci_0_5h'] + 1)
-    
-    # ETA estimate
     df['eta_hours'] = np.where(
         df['closing_speed_m_per_h'] > 0,
         df['dist_min_ci_0_5h'] / (df['closing_speed_m_per_h'] + 1e-6),
@@ -60,15 +57,11 @@ def engineer_features(df):
     )
     df['eta_hours'] = df['eta_hours'].clip(0, 999)
     df['log_eta'] = np.log1p(df['eta_hours'])
-    
-    # Growth indicators
     df['has_growth'] = (df['area_growth_abs_0_5h'] > 0).astype(int)
     df['growth_x_closing'] = df['area_growth_rate_ha_per_h'] * df['closing_speed_m_per_h']
     df['is_closing'] = (df['closing_speed_m_per_h'] > 0).astype(int)
     df['abs_dist_accel'] = np.abs(df['dist_accel_m_per_h2'])
     df['radial_x_alignment'] = df['radial_growth_rate_m_per_h'] * df['alignment_abs']
-    
-    # Temporal
     df['is_night'] = ((df['event_start_hour'] >= 20) | (df['event_start_hour'] <= 6)).astype(int)
     df['is_weekend'] = (df['event_start_dayofweek'] >= 5).astype(int)
     df['is_summer'] = df['event_start_month'].isin([6, 7, 8]).astype(int)
@@ -76,63 +69,21 @@ def engineer_features(df):
     df['hour_cos'] = np.cos(2 * np.pi * df['event_start_hour'] / 24)
     df['month_sin'] = np.sin(2 * np.pi * df['event_start_month'] / 12)
     df['month_cos'] = np.cos(2 * np.pi * df['event_start_month'] / 12)
-    
-    # Perimeter density
     df['perimeter_rate'] = df['num_perimeters_0_5h'] / (df['dt_first_last_0_5h'] + 0.1)
-    
-    # Distance risk categories
     df['dist_risk_close'] = (df['dist_min_ci_0_5h'] < 3000).astype(int)
     df['dist_risk_medium'] = ((df['dist_min_ci_0_5h'] >= 3000) & (df['dist_min_ci_0_5h'] < 10000)).astype(int)
     df['dist_risk_far'] = (df['dist_min_ci_0_5h'] >= 50000).astype(int)
-    
-    # Cross features
     df['speed_x_dist'] = df['centroid_speed_m_per_h'] * df['dist_min_ci_0_5h']
     df['area_x_growth'] = df['area_first_ha'] * df['area_growth_rel_0_5h']
     df['along_track_urgency'] = df['along_track_speed'] / (df['dist_min_ci_0_5h'] + 1)
     df['proj_advance_ratio'] = df['projected_advance_m'] / (df['dist_min_ci_0_5h'] + 1)
     df['dist_min_sq'] = df['dist_min_ci_0_5h'] ** 2 / 1e10
     df['log_area_first'] = np.log1p(df['area_first_ha'])
-    
-    # Additional features for v2
-    # Interaction between distance and growth
     df['dist_growth_interaction'] = df['log_dist_min'] * df['has_growth']
-    
-    # Ratio of radial growth to distance
     df['radial_to_dist'] = df['radial_growth_m'] / (df['dist_min_ci_0_5h'] + 1)
-    
-    # Combined directional signal
     df['directional_threat'] = df['alignment_abs'] * df['closing_speed_abs_m_per_h']
-    
-    # Fire intensity proxy: area × growth rate
     df['intensity_proxy'] = np.log1p(df['area_first_ha'] * df['area_growth_rate_ha_per_h'])
-
-    # ============================================================
-    # START: ADVANCED FEATURE ENGINEERING (v3)
-    # Only features where BOTH parent signals are strong (data-backed)
-    # ============================================================
-
-    # 1. Explosive Growth Index
-    # Question: "Did this small fire just explode?"
-    # Small fire + massive relative growth = unpredictable, out-of-nowhere danger
-    # Both parent signals (area_growth_rel, area_first_ha) have 6%+ importance
-    df['explosive_growth_index'] = df['area_growth_rel_0_5h'] / (np.log1p(df['area_first_ha']) + 0.1)
-
-    # 2. Kinetic Threat Proxy
-    # Question: "What is this fire's total destructive momentum?"
-    # Analogous to kinetic energy: log(area) as mass × closing_speed² as velocity
-    # Combines top two factor groups: growth (6%) and distance/closing (84%)
-    df['kinetic_threat_proxy'] = np.log1p(df['area_first_ha']) * (df['closing_speed_m_per_h'] ** 2)
-
-    # 3. Confidence-Weighted Urgency
-    # Question: "How urgent is this, adjusted for data quality?"
-    # Discounts urgency_ratio when low_temporal_resolution=1 (bad/sparse data)
-    # Fixes a real data quality problem — urgency is meaningless on sparse observations
-    df['confidence_weighted_urgency'] = df['urgency_ratio'] * (1 - df['low_temporal_resolution_0_5h'])
-
-    # ============================================================
-    # END: ADVANCED FEATURE ENGINEERING (v3)
-    # ============================================================
-
+    
     return df
 
 train_eng = engineer_features(train_df)
@@ -181,25 +132,172 @@ def compute_weighted_brier(y_true_event, y_true_time, pred_probs_dict):
     return total
 
 # ============================================================
-# 3. MODEL TRAINING - REPEATED 5-FOLD CV FOR STABILITY
+# 3. OPTUNA HYPERPARAMETER TUNING FOR GBSA + RSF
 # ============================================================
 print("\n" + "=" * 70)
-print("MODEL TRAINING (Repeated CV for stability)")
+print("PHASE 1: OPTUNA HYPERPARAMETER SEARCH")
+print("=" * 70)
+
+# Use a quick 5-fold CV (no repeats) for Optuna speed
+skf_optuna = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+
+def optuna_gbsa_objective(trial):
+    """Objective function for Optuna to optimize GBSA hyperparameters."""
+    params = {
+        'n_estimators': trial.suggest_int('n_estimators', 100, 500, step=50),
+        'learning_rate': trial.suggest_float('learning_rate', 0.01, 0.15, log=True),
+        'max_depth': trial.suggest_int('max_depth', 2, 5),
+        'min_samples_split': trial.suggest_int('min_samples_split', 3, 15),
+        'min_samples_leaf': trial.suggest_int('min_samples_leaf', 1, 8),
+        'subsample': trial.suggest_float('subsample', 0.6, 0.95),
+    }
+    
+    oof_probs = {h: np.zeros(len(X_train)) for h in HORIZONS}
+    oof_risk = np.zeros(len(X_train))
+    
+    for train_idx, val_idx in skf_optuna.split(X_train_scaled, y_event):
+        X_tr, X_val = X_train_scaled[train_idx], X_train_scaled[val_idx]
+        y_tr = y_surv[train_idx]
+        
+        model = GradientBoostingSurvivalAnalysis(random_state=42, **params)
+        model.fit(X_tr, y_tr)
+        
+        surv_fns = model.predict_survival_function(X_val)
+        risk = model.predict(X_val)
+        
+        for i, fn in enumerate(surv_fns):
+            for h in HORIZONS:
+                try:
+                    prob = 1 - fn(h)
+                except:
+                    prob = 1.0 if h > fn.x[-1] else 0.0
+                # BUGFIX: clip probability to valid range
+                oof_probs[h][val_idx[i]] = np.clip(prob, 0.0, 1.0)
+        oof_risk[val_idx] = risk
+    
+    c_idx = concordance_index_censored(y_event, y_time, oof_risk)[0]
+    wbs = compute_weighted_brier(y_event, y_time, oof_probs)
+    hybrid = 0.3 * c_idx + 0.7 * (1 - wbs)
+    
+    return hybrid
+
+def optuna_rsf_objective(trial):
+    """Objective function for Optuna to optimize RSF hyperparameters."""
+    params = {
+        'n_estimators': trial.suggest_int('n_estimators', 200, 600, step=50),
+        'max_depth': trial.suggest_int('max_depth', 3, 10),
+        'min_samples_split': trial.suggest_int('min_samples_split', 5, 20),
+        'min_samples_leaf': trial.suggest_int('min_samples_leaf', 2, 10),
+    }
+    
+    oof_probs = {h: np.zeros(len(X_train)) for h in HORIZONS}
+    oof_risk = np.zeros(len(X_train))
+    
+    for train_idx, val_idx in skf_optuna.split(X_train_scaled, y_event):
+        X_tr, X_val = X_train_scaled[train_idx], X_train_scaled[val_idx]
+        y_tr = y_surv[train_idx]
+        
+        model = RandomSurvivalForest(random_state=42, n_jobs=-1, **params)
+        model.fit(X_tr, y_tr)
+        
+        surv_fns = model.predict_survival_function(X_val)
+        risk = model.predict(X_val)
+        
+        for i, fn in enumerate(surv_fns):
+            for h in HORIZONS:
+                try:
+                    prob = 1 - fn(h)
+                except:
+                    prob = 1.0 if h > fn.x[-1] else 0.0
+                oof_probs[h][val_idx[i]] = np.clip(prob, 0.0, 1.0)
+        oof_risk[val_idx] = risk
+    
+    c_idx = concordance_index_censored(y_event, y_time, oof_risk)[0]
+    wbs = compute_weighted_brier(y_event, y_time, oof_probs)
+    hybrid = 0.3 * c_idx + 0.7 * (1 - wbs)
+    
+    return hybrid
+
+# --- GBSA Optuna ---
+N_GBSA_TRIALS = 100
+print(f"\n--- GBSA: Running {N_GBSA_TRIALS} Optuna trials ---")
+gbsa_study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+gbsa_study.optimize(optuna_gbsa_objective, n_trials=N_GBSA_TRIALS, show_progress_bar=False)
+
+print(f"Best GBSA Hybrid: {gbsa_study.best_value:.4f}")
+print(f"Best params: {gbsa_study.best_params}")
+
+# Get top-5 diverse configs
+top_trials = sorted(gbsa_study.trials, key=lambda t: t.value if t.value is not None else -1, reverse=True)
+gbsa_top_configs = []
+seen_keys = set()
+for trial in top_trials:
+    if trial.value is None:
+        continue
+    # Diversity key: max_depth + n_estimators bucket
+    key = (trial.params['max_depth'], trial.params['n_estimators'] // 100)
+    if key not in seen_keys and len(gbsa_top_configs) < 5:
+        gbsa_top_configs.append(trial.params)
+        seen_keys.add(key)
+    if len(gbsa_top_configs) >= 5:
+        break
+
+# Fill remaining from top if needed
+if len(gbsa_top_configs) < 5:
+    for trial in top_trials:
+        if trial.value is not None and trial.params not in gbsa_top_configs:
+            gbsa_top_configs.append(trial.params)
+        if len(gbsa_top_configs) >= 5:
+            break
+
+print(f"Using {len(gbsa_top_configs)} diverse configs for GBSA ensemble")
+
+# --- RSF Optuna ---
+N_RSF_TRIALS = 60
+print(f"\n--- RSF: Running {N_RSF_TRIALS} Optuna trials ---")
+rsf_study = optuna.create_study(direction='maximize', sampler=optuna.samplers.TPESampler(seed=42))
+rsf_study.optimize(optuna_rsf_objective, n_trials=N_RSF_TRIALS, show_progress_bar=False)
+
+print(f"Best RSF Hybrid: {rsf_study.best_value:.4f}")
+print(f"Best params: {rsf_study.best_params}")
+
+# Get top-3 diverse RSF configs
+top_rsf_trials = sorted(rsf_study.trials, key=lambda t: t.value if t.value is not None else -1, reverse=True)
+rsf_top_configs = []
+seen_keys = set()
+for trial in top_rsf_trials:
+    if trial.value is None:
+        continue
+    key = (trial.params['max_depth'], trial.params['min_samples_leaf'])
+    if key not in seen_keys and len(rsf_top_configs) < 3:
+        rsf_top_configs.append(trial.params)
+        seen_keys.add(key)
+    if len(rsf_top_configs) >= 3:
+        break
+
+if len(rsf_top_configs) < 3:
+    for trial in top_rsf_trials:
+        if trial.value is not None and trial.params not in rsf_top_configs:
+            rsf_top_configs.append(trial.params)
+        if len(rsf_top_configs) >= 3:
+            break
+
+print(f"Using {len(rsf_top_configs)} diverse configs for RSF ensemble")
+
+# ============================================================
+# 4. MODEL TRAINING - REPEATED 5-FOLD CV WITH OPTIMIZED CONFIGS
+# ============================================================
+print("\n" + "=" * 70)
+print("PHASE 2: MODEL TRAINING (Repeated CV with Optuna-optimized GBSA)")
 print("=" * 70)
 
 n_folds = 5
 n_repeats = 3
 rskf = RepeatedStratifiedKFold(n_splits=n_folds, n_repeats=n_repeats, random_state=42)
 
-# ---- GBSA ----
-print("\n--- Gradient Boosting Survival Analysis ---")
-gbsa_configs = [
-    {'n_estimators': 200, 'learning_rate': 0.05, 'max_depth': 3, 'min_samples_split': 5, 'subsample': 0.8},
-    {'n_estimators': 150, 'learning_rate': 0.1, 'max_depth': 3, 'min_samples_split': 10, 'subsample': 0.7},
-    {'n_estimators': 300, 'learning_rate': 0.02, 'max_depth': 2, 'min_samples_split': 5, 'subsample': 0.9},
-    {'n_estimators': 200, 'learning_rate': 0.08, 'max_depth': 4, 'min_samples_split': 8, 'subsample': 0.75},
-    {'n_estimators': 250, 'learning_rate': 0.03, 'max_depth': 3, 'min_samples_split': 7, 'subsample': 0.85},
-]
+# ---- GBSA (now with Optuna-optimized configs) ----
+print("\n--- Gradient Boosting Survival Analysis (Optuna-tuned) ---")
+gbsa_configs = gbsa_top_configs
 
 test_probs_gbsa = {h: np.zeros(len(X_test)) for h in HORIZONS}
 test_risk_gbsa = np.zeros(len(X_test))
@@ -208,8 +306,6 @@ oof_risk_gbsa = np.zeros(len(X_train))
 oof_counts = np.zeros(len(X_train))
 
 fold_c_indices = []
-fold_hybrids = []
-
 total_folds = n_folds * n_repeats
 fold_num = 0
 
@@ -252,13 +348,11 @@ for train_idx, val_idx in rskf.split(X_train_scaled, y_event):
                 test_fold_probs[h][i] += prob / len(gbsa_configs)
         test_fold_risk += test_risk_pred / len(gbsa_configs)
     
-    # Accumulate OOF
     for h in HORIZONS:
         oof_probs_gbsa[h][val_idx] += fold_probs[h]
     oof_risk_gbsa[val_idx] += fold_risk
     oof_counts[val_idx] += 1
     
-    # Accumulate test
     for h in HORIZONS:
         test_probs_gbsa[h] += test_fold_probs[h] / total_folds
     test_risk_gbsa += test_fold_risk / total_folds
@@ -269,7 +363,6 @@ for train_idx, val_idx in rskf.split(X_train_scaled, y_event):
     if fold_num % n_folds == 0:
         print(f"  Repeat {fold_num // n_folds}/{n_repeats} avg C-index: {np.mean(fold_c_indices[-n_folds:]):.4f}")
 
-# Average OOF
 for h in HORIZONS:
     oof_probs_gbsa[h] /= oof_counts
 oof_risk_gbsa /= oof_counts
@@ -279,13 +372,9 @@ wbs_gbsa = compute_weighted_brier(y_event, y_time, oof_probs_gbsa)
 hybrid_gbsa = 0.3 * c_gbsa + 0.7 * (1 - wbs_gbsa)
 print(f"  GBSA OOF: C-index={c_gbsa:.4f}, WBS={wbs_gbsa:.4f}, Hybrid={hybrid_gbsa:.4f}")
 
-# ---- RSF ----
+# ---- RSF (same as v2) ----
 print("\n--- Random Survival Forest ---")
-rsf_configs = [
-    {'n_estimators': 300, 'max_depth': 5, 'min_samples_split': 10, 'min_samples_leaf': 5},
-    {'n_estimators': 500, 'max_depth': 7, 'min_samples_split': 8, 'min_samples_leaf': 3},
-    {'n_estimators': 400, 'max_depth': None, 'min_samples_split': 12, 'min_samples_leaf': 4},
-]
+rsf_configs = rsf_top_configs
 
 test_probs_rsf = {h: np.zeros(len(X_test)) for h in HORIZONS}
 test_risk_rsf = np.zeros(len(X_test))
@@ -376,7 +465,6 @@ for train_idx, val_idx in rskf.split(X_train_scaled, y_event):
         test_surv = cph.predict_survival_function(test_fold_df)
         
         for h in HORIZONS:
-            # Use interpolation for exact horizon values
             closest_time = val_surv.index[np.argmin(np.abs(val_surv.index - h))]
             oof_probs_cox[h][val_idx] += 1 - val_surv.loc[closest_time].values
             
@@ -417,7 +505,6 @@ test_probs_weibull = {h: np.zeros(len(X_test)) for h in HORIZONS}
 oof_probs_weibull = {h: np.zeros(len(X_train)) for h in HORIZONS}
 oof_risk_weibull = np.zeros(len(X_train))
 oof_counts_weibull = np.zeros(len(X_train))
-weibull_fold_count = 0
 
 fold_num = 0
 for train_idx, val_idx in rskf.split(X_train_scaled, y_event):
@@ -444,7 +531,6 @@ for train_idx, val_idx in rskf.split(X_train_scaled, y_event):
         val_median = waft.predict_median(val_fold_df[imp_feats]).values.flatten()
         oof_risk_weibull[val_idx] += -val_median
         oof_counts_weibull[val_idx] += 1
-        weibull_fold_count += 1
     except Exception as e:
         oof_counts_weibull[val_idx] += 1
         for h in HORIZONS:
@@ -463,7 +549,7 @@ hybrid_weibull = 0.3 * c_weibull + 0.7 * (1 - wbs_weibull)
 print(f"  Weibull AFT OOF: C-index={c_weibull:.4f}, WBS={wbs_weibull:.4f}, Hybrid={hybrid_weibull:.4f}")
 
 # ============================================================
-# 4. OPTIMAL ENSEMBLE BLENDING
+# 5. OPTIMAL ENSEMBLE BLENDING
 # ============================================================
 print("\n" + "=" * 70)
 print("OPTIMAL ENSEMBLE BLENDING")
@@ -484,12 +570,9 @@ print("\nIndividual model scores:")
 for name, res in model_results.items():
     print(f"  {name}: Hybrid={res['hybrid']:.4f}")
 
-# Grid search for optimal blend weights
 best_hybrid = -1
 best_weights = None
 
-# Focus primarily on GBSA and RSF (the non-parametric models which typically perform best)
-# Also include Cox and Weibull with smaller weights
 for w_gbsa in np.arange(0.2, 0.7, 0.05):
     for w_rsf in np.arange(0.2, 0.7, 0.05):
         remaining = 1.0 - w_gbsa - w_rsf
@@ -505,14 +588,12 @@ for w_gbsa in np.arange(0.2, 0.7, 0.05):
             ws_sum = sum(ws)
             ws = [w / ws_sum for w in ws]
             
-            # Blend probabilities
             blend_probs = {}
             for h in HORIZONS:
                 blend_probs[h] = np.zeros(len(X_train))
                 for name, w in zip(model_results.keys(), ws):
                     blend_probs[h] += w * model_results[name]['oof_probs'][h]
             
-            # Blend risk (using rank-based blending for C-index)
             blend_risk = np.zeros(len(X_train))
             for name, w in zip(model_results.keys(), ws):
                 blend_risk += w * rankdata(model_results[name]['oof_risk']) / len(X_train)
@@ -530,7 +611,6 @@ for name, w in best_weights.items():
     print(f"  {name}: {w:.4f}")
 print(f"Best blend Hybrid: {best_hybrid:.4f}")
 
-# Generate final blended predictions
 final_test_probs = {}
 for h in HORIZONS:
     final_test_probs[h] = np.zeros(len(X_test))
@@ -538,17 +618,15 @@ for h in HORIZONS:
         final_test_probs[h] += w * model_results[name]['test_probs'][h]
 
 # ============================================================
-# 5. SMOOTH CALIBRATION (NOT ISOTONIC - too aggressive for small data)
+# 6. SMOOTH CALIBRATION
 # ============================================================
 print("\n" + "=" * 70)
 print("SMOOTH PROBABILITY CALIBRATION")
 print("=" * 70)
 
-# Use a simple beta calibration approach: fit a logistic mapping
 from sklearn.linear_model import LogisticRegression
 
 for h in HORIZONS:
-    # Create binary labels
     labels = np.zeros(len(y_event))
     mask = np.ones(len(y_event), dtype=bool)
     for i in range(len(y_event)):
@@ -564,26 +642,21 @@ for h in HORIZONS:
     n_pos = labels[mask].sum()
     n_neg = n_valid - n_pos
     
-    # Blend OOF predictions for calibration
     oof_blend_h = np.zeros(len(X_train))
     for name, w in best_weights.items():
         oof_blend_h += w * model_results[name]['oof_probs'][h]
     
     if n_valid > 20 and n_pos > 3 and n_neg > 3:
-        # Use logistic regression (Platt scaling) - smoother than isotonic
-        # Transform predictions to log-odds space
         oof_clip = np.clip(oof_blend_h[mask], 0.001, 0.999)
         log_odds = np.log(oof_clip / (1 - oof_clip)).reshape(-1, 1)
         
         lr = LogisticRegression(C=1.0, max_iter=1000)
         lr.fit(log_odds, labels[mask])
         
-        # Calibrate test predictions
         test_clip = np.clip(final_test_probs[h], 0.001, 0.999)
         test_log_odds = np.log(test_clip / (1 - test_clip)).reshape(-1, 1)
         final_test_probs[h] = lr.predict_proba(test_log_odds)[:, 1]
         
-        # Evaluate calibration
         oof_calib = lr.predict_proba(log_odds)[:, 1]
         brier_before = np.mean((oof_blend_h[mask] - labels[mask]) ** 2)
         brier_after = np.mean((oof_calib - labels[mask]) ** 2)
@@ -592,31 +665,25 @@ for h in HORIZONS:
         print(f"  {h}h: insufficient data for calibration (valid={n_valid}, pos={int(n_pos)})")
 
 # ============================================================
-# 6. MONOTONICITY ENFORCEMENT
+# 7. MONOTONICITY ENFORCEMENT
 # ============================================================
 print("\n" + "=" * 70)
 print("MONOTONICITY ENFORCEMENT")
 print("=" * 70)
 
-# Clip to valid range
 for h in HORIZONS:
     final_test_probs[h] = np.clip(final_test_probs[h], 0.001, 0.999)
 
-# Enforce monotonicity: P(t<=12) <= P(t<=24) <= P(t<=48) <= P(t<=72)
 for i in range(len(X_test)):
     probs = [final_test_probs[h][i] for h in HORIZONS]
     
-    # Use isotonic regression on the 4 values to enforce monotonicity
-    # (pool adjacent violators algorithm)
     corrected = list(probs)
     for j in range(1, 4):
         if corrected[j] < corrected[j-1]:
-            # Set both to their average
             avg = (corrected[j] + corrected[j-1]) / 2
             corrected[j] = min(avg + 0.005, 0.999)
             corrected[j-1] = max(avg - 0.005, 0.001)
     
-    # Final pass to guarantee strict monotonicity
     for j in range(1, 4):
         if corrected[j] <= corrected[j-1]:
             corrected[j] = min(corrected[j-1] + 0.01, 0.999)
@@ -630,7 +697,7 @@ violations = sum(1 for i in range(len(X_test))
 print(f"Monotonicity violations: {violations}")
 
 # ============================================================
-# 7. GENERATE SUBMISSION
+# 8. GENERATE SUBMISSION
 # ============================================================
 print("\n" + "=" * 70)
 print("GENERATING SUBMISSION")
@@ -646,7 +713,7 @@ submission = pd.DataFrame({
 
 submission = submission.set_index('event_id').loc[sample_sub['event_id']].reset_index()
 
-submission_path = os.path.join(DATA_DIR, "submission.csv")
+submission_path = os.path.join(DATA_DIR, "submission_optuna.csv")
 submission.to_csv(submission_path, index=False)
 
 print(f"Saved to: {submission_path}")
@@ -656,7 +723,6 @@ for h in HORIZONS:
     v = submission[col]
     print(f"  {col}: mean={v.mean():.4f}, std={v.std():.4f}, min={v.min():.4f}, max={v.max():.4f}")
 
-# Distribution check
 print(f"\nPrediction distribution (prob_48h):")
 for threshold in [0.1, 0.25, 0.5, 0.75, 0.9]:
     count = (submission['prob_48h'] >= threshold).sum()
@@ -665,7 +731,8 @@ for threshold in [0.1, 0.25, 0.5, 0.75, 0.9]:
 print("\n" + "=" * 70)
 print("FINAL SUMMARY")
 print("=" * 70)
-print(f"\nBest individual model: {max(model_results, key=lambda k: model_results[k]['hybrid'])}"
+print(f"\nOptuna best GBSA Hybrid: {gbsa_study.best_value:.4f}, RSF Hybrid: {rsf_study.best_value:.4f}")
+print(f"Best individual model: {max(model_results, key=lambda k: model_results[k]['hybrid'])}"
       f" (Hybrid: {max(r['hybrid'] for r in model_results.values()):.4f})")
 print(f"Optimized ensemble:    Hybrid: {best_hybrid:.4f}")
-print(f"\n✅ Submission file ready: {submission_path}")
+print(f"\nSubmission file ready: {submission_path}")

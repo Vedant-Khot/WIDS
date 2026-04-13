@@ -1,8 +1,8 @@
 """
-WiDS 2025 Datathon - Wildfire Survival Analysis Model (v3)
+WiDS 2025 Datathon - Wildfire Survival Analysis Model (v2)
 ==========================================================
-Advanced feature engineering: fire behavior, contextual anomaly, and threat composite features.
-Builds on v2 calibration and ensemble approach with domain-driven additional features.
+Improved approach with better calibration for small datasets.
+Uses direct survival function output rather than over-aggressive isotonic calibration.
 """
 
 import numpy as np
@@ -24,7 +24,7 @@ import os
 # 1. DATA LOADING
 # ============================================================
 print("=" * 70)
-print("WiDS 2025 WILDFIRE SURVIVAL ANALYSIS (v3)")
+print("WiDS 2025 WILDFIRE SURVIVAL ANALYSIS (v2)")
 print("=" * 70)
 
 DATA_DIR = r"d:\wids"
@@ -105,34 +105,7 @@ def engineer_features(df):
     
     # Fire intensity proxy: area × growth rate
     df['intensity_proxy'] = np.log1p(df['area_first_ha'] * df['area_growth_rate_ha_per_h'])
-
-    # ============================================================
-    # START: ADVANCED FEATURE ENGINEERING (v3)
-    # Only features where BOTH parent signals are strong (data-backed)
-    # ============================================================
-
-    # 1. Explosive Growth Index
-    # Question: "Did this small fire just explode?"
-    # Small fire + massive relative growth = unpredictable, out-of-nowhere danger
-    # Both parent signals (area_growth_rel, area_first_ha) have 6%+ importance
-    df['explosive_growth_index'] = df['area_growth_rel_0_5h'] / (np.log1p(df['area_first_ha']) + 0.1)
-
-    # 2. Kinetic Threat Proxy
-    # Question: "What is this fire's total destructive momentum?"
-    # Analogous to kinetic energy: log(area) as mass × closing_speed² as velocity
-    # Combines top two factor groups: growth (6%) and distance/closing (84%)
-    df['kinetic_threat_proxy'] = np.log1p(df['area_first_ha']) * (df['closing_speed_m_per_h'] ** 2)
-
-    # 3. Confidence-Weighted Urgency
-    # Question: "How urgent is this, adjusted for data quality?"
-    # Discounts urgency_ratio when low_temporal_resolution=1 (bad/sparse data)
-    # Fixes a real data quality problem — urgency is meaningless on sparse observations
-    df['confidence_weighted_urgency'] = df['urgency_ratio'] * (1 - df['low_temporal_resolution_0_5h'])
-
-    # ============================================================
-    # END: ADVANCED FEATURE ENGINEERING (v3)
-    # ============================================================
-
+    
     return df
 
 train_eng = engineer_features(train_df)

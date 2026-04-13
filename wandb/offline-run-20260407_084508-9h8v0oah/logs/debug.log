@@ -1,0 +1,20 @@
+2026-04-07 08:45:08,711 INFO    MainThread:6340 [wandb_setup.py:_flush():81] Current SDK version is 0.25.1
+2026-04-07 08:45:08,711 INFO    MainThread:6340 [wandb_setup.py:_flush():81] Configure stats pid to 6340
+2026-04-07 08:45:08,711 INFO    MainThread:6340 [wandb_setup.py:_flush():81] Loading settings from environment variables
+2026-04-07 08:45:08,712 INFO    MainThread:6340 [wandb_init.py:setup_run_log_directory():717] Logging user logs to D:\wids\wandb\offline-run-20260407_084508-9h8v0oah\logs\debug.log
+2026-04-07 08:45:08,712 INFO    MainThread:6340 [wandb_init.py:setup_run_log_directory():718] Logging internal logs to D:\wids\wandb\offline-run-20260407_084508-9h8v0oah\logs\debug-internal.log
+2026-04-07 08:45:08,712 INFO    MainThread:6340 [wandb_init.py:init():844] calling init triggers
+2026-04-07 08:45:08,712 INFO    MainThread:6340 [wandb_init.py:init():849] wandb.init called with sweep_config: {}
+config: {'version': 'v5', 'n_folds': 5, 'n_repeats': 3, 'optuna_trials': 50, 'n_seeds': 3, 'km_prior_weight': 0.0, 'hybrid_c_index_weight': 0.3, 'hybrid_brier_weight': 0.7, 'brier_weights': {'24h': 0.3, '48h': 0.4, '72h': 0.3}, 'meta_model': 'Ridge(alpha=10)', 'ensemble_method': 'stacking', '_wandb': {}}
+2026-04-07 08:45:08,712 INFO    MainThread:6340 [wandb_init.py:init():892] starting backend
+2026-04-07 08:45:11,491 INFO    MainThread:6340 [wandb_init.py:init():895] sending inform_init request
+2026-04-07 08:45:11,716 INFO    MainThread:6340 [wandb_init.py:init():903] backend started and connected
+2026-04-07 08:45:11,820 INFO    MainThread:6340 [wandb_init.py:init():973] updated telemetry
+2026-04-07 08:45:11,902 INFO    MainThread:6340 [wandb_init.py:init():997] communicating run to backend with 90.0 second timeout
+2026-04-07 08:45:12,450 INFO    MainThread:6340 [wandb_init.py:init():1042] starting run threads in backend
+2026-04-07 08:45:23,590 INFO    MainThread:6340 [wandb_run.py:_console_start():2524] atexit reg
+2026-04-07 08:45:23,590 INFO    MainThread:6340 [wandb_run.py:_redirect():2373] redirect: wrap_raw
+2026-04-07 08:45:23,590 INFO    MainThread:6340 [wandb_run.py:_redirect():2442] Wrapping output streams.
+2026-04-07 08:45:23,591 INFO    MainThread:6340 [wandb_run.py:_redirect():2465] Redirects installed.
+2026-04-07 08:45:23,603 INFO    MainThread:6340 [wandb_init.py:init():1082] run started, returning control to user process
+2026-04-07 08:45:23,752 INFO    MainThread:6340 [wandb_run.py:_config_callback():1403] config_cb None None {'n_features': 59, 'feature_names': ['num_perimeters_0_5h', 'dt_first_last_0_5h', 'low_temporal_resolution_0_5h', 'area_first_ha', 'area_growth_abs_0_5h', 'area_growth_rel_0_5h', 'area_growth_rate_ha_per_h', 'log1p_area_first', 'log1p_growth', 'log_area_ratio_0_5h', 'relative_growth_0_5h', 'radial_growth_m', 'radial_growth_rate_m_per_h', 'centroid_displacement_m', 'centroid_speed_m_per_h', 'spread_bearing_deg', 'spread_bearing_sin', 'spread_bearing_cos', 'dist_min_ci_0_5h', 'dist_std_ci_0_5h', 'dist_change_ci_0_5h', 'dist_slope_ci_0_5h', 'closing_speed_m_per_h', 'closing_speed_abs_m_per_h', 'projected_advance_m', 'dist_accel_m_per_h2', 'dist_fit_r2_0_5h', 'alignment_cos', 'alignment_abs', 'cross_track_component', 'along_track_speed', 'event_start_hour', 'event_start_dayofweek', 'event_start_month', 'log_dist_min', 'urgency_ratio', 'is_night', 'is_summer', 'dist_risk_close', 'has_growth', 'directional_threat', 'wind_driven_index', 'explosive_growth_index', 'night_growth_anomaly', 'confidence_weighted_urgency', 'night_closing_anomaly', 'kinetic_threat_proxy', 'fast_hit_signal', 'time_pressure', 'log_urgency', 'low_res_x_dist', 'low_res_x_urgency', 'low_res_x_growth', 'closing_decel', 'fire_momentum', 'threat_acceleration', 'dist_min_ci_0_5h_pctile', 'closing_speed_m_per_h_pctile', 'area_first_ha_pctile']}
