@@ -1,0 +1,52 @@
+
+Here is the exact breakdown of the "Intelligence" inside that submission:
+
+1. Solving the "60-Fire" Problem (Data Augmentation)
+
+The biggest hurdle was having only 60 fires with movement data. We solved this by producing "Digital Twins":
+
+We generated 1,200 synthetic fires by jittering the originals.
+
+The Physics Rule: We ensured that if we increased a twin's distance from the zone, we also increased its speed proportionally to keep the Time-To-Impact (TTI) physically consistent. This "taught" the model the laws of motion rather than just letting it memorize 60 IDs.
+
+2. Structural Segmentation (The Two-Brain Strategy)
+
+We recognized that the data is split into two fundamentally different species:
+
+The Static Population (72%): Fires with only 1 perimeter. We built a Static Expert that ignores speed (since it's zero) and focuses purely on Proximity and Area.
+
+The Dynamic Population (28%): Fires with multiple perimeters. We built a Dynamic Expert (trained on the 1,200 twins) that focuses on Kinematics, Alignment, and Velocity.
+
+3. Feature "Amplication" (The Gold Features)
+
+We created features that made the model's job easy by highlighting the "Physical Truths" we found in your reports:
+
+Distance Sigmoid: Instead of raw distance, we used a Sigmoid curve centered at 4,837m (the midpoint of the "cliff" you discovered). This tells the model exactly where the "danger boundary" is.
+
+TTI (Time-to-Impact): A calculated estimation of when the fire's edge will touch the 5km buffer based on current velocity.
+
+Vector Momentum: Combining total_speed with alignment_abs to prioritize fires that are "aimed" directly at the zone.
+
+4. Grandmaster-Level Modeling (TabPFN + CatBoost)
+
+TabPFN: We integrated a state-of-the-art Tabular Transformer pre-trained on millions of synthetic datasets. It is the current "gold standard" for datasets under 1,000 rows.
+
+CatBoost: We used CatBoost for the Expert segments because its "Ordered Boosting" mechanism is the most resistant to noise in sparse data.
+
+5. Rank Blending (The AUC Cheat Code)
+
+Instead of averaging the probability numbers (e.g., 0.8 + 0.2 = 0.5), we averaged the Ranks (e.g., "Fire A is the 1st most dangerous" + "Fire A is the 3rd most dangerous").
+
+Why it worked: AUC (the metric) only cares about the Order of the fires. Rank blending removes "calibration noise" and focuses 100% on getting the sequence of danger right.
+
+6. Physical Boundary Overrides
+
+We used your data analysis report to eliminate "Machine Learning Hallucinations":
+
+The Proximity Override: Any fire < 4,600m was pushed toward 1.0 for the 72h horizon.
+
+The Safe-Zone Override: Any fire > 5,200m was pushed toward 0.001.
+
+Strict Monotonicity: We enforced 
+P12≤P24≤P48≤P72 to ensure the model never predicted a fire would hit sooner in a longer window.
+
